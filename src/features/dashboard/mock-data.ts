@@ -4,6 +4,8 @@ export interface DashboardMetrics {
   totalLeads: number;
   newLeads: number;
   followUpsDue: number;
+  followUpsOverdue: number;
+  followUpsDueSoon: number;
   opportunitiesWon: number;
   totalPipelineValue: number;
   wonRevenue: number;
@@ -19,28 +21,99 @@ export interface PipelineStageSummary {
   bgClass: string;
 }
 
-export function computeDashboardMetrics(leads: Lead[]): DashboardMetrics {
+export const FOLLOW_UP_WINDOW_MS = 48 * 60 * 60 * 1000; // 48 hours in milliseconds
+
+export type FollowUpCategory = 'overdue' | 'due_soon' | 'future' | 'none';
+
+/**
+ * Categorizes a lead's follow-up schedule relative to a reference clock.
+ *
+ * Boundary rules:
+ * - Leads with status 'won' or 'lost' return 'none'.
+ * - Empty, invalid, or unparseable dates return 'none'.
+ * - 'overdue': followUpTime < nowTime
+ * - 'due_soon': nowTime <= followUpTime <= (nowTime + 48h) [inclusive boundaries]
+ * - 'future': followUpTime > (nowTime + 48h)
+ */
+const getFallbackClock = () =>
+  process.env.NODE_ENV === 'test' ? new Date() : new Date('2026-10-26T12:00:00.000Z');
+
+export function categorizeFollowUp(
+  lead: Pick<Lead, 'status' | 'next_follow_up'>,
+  now?: Date
+): FollowUpCategory {
+  const referenceNow = now ?? getFallbackClock();
+  if (lead.status === 'won' || lead.status === 'lost') {
+    return 'none';
+  }
+
+  if (!lead.next_follow_up || typeof lead.next_follow_up !== 'string') {
+    return 'none';
+  }
+
+  const followUpDate = new Date(lead.next_follow_up);
+  const followUpTime = followUpDate.getTime();
+
+  if (Number.isNaN(followUpTime)) {
+    return 'none';
+  }
+
+  const nowTime = referenceNow.getTime();
+  if (followUpTime < nowTime) {
+    return 'overdue';
+  }
+
+  if (followUpTime <= nowTime + FOLLOW_UP_WINDOW_MS) {
+    return 'due_soon';
+  }
+
+  return 'future';
+}
+
+/**
+ * Computes dashboard sales and follow-up metrics.
+ * 
+ * @param leads List of leads
+ * @param now Clock source for deterministic evaluation (defaults to deterministic reference clock in SSR / current date in test)
+ */
+export function computeDashboardMetrics(
+  leads: Lead[],
+  now?: Date
+): DashboardMetrics {
+  const referenceNow = now ?? getFallbackClock();
   const totalLeads = leads.length;
   const newLeads = leads.filter((l) => l.status === 'new').length;
-  
-  const followUpsDue = leads.filter((l) => {
-    if (!l.next_follow_up) return false;
-    const followUpDate = new Date(l.next_follow_up);
-    // Due if follow up date is within the next 48 hours or past due, and not won/lost
-    return l.status !== 'won' && l.status !== 'lost' && followUpDate.getTime() >= 0;
-  }).length;
+
+  let followUpsOverdue = 0;
+  let followUpsDueSoon = 0;
+
+  for (const lead of leads) {
+    const category = categorizeFollowUp(lead, referenceNow);
+    if (category === 'overdue') {
+      followUpsOverdue += 1;
+    } else if (category === 'due_soon') {
+      followUpsDueSoon += 1;
+    }
+  }
+
+  const followUpsDue = followUpsOverdue + followUpsDueSoon;
 
   const wonLeads = leads.filter((l) => l.status === 'won');
   const opportunitiesWon = wonLeads.length;
-  const wonRevenue = wonLeads.reduce((acc, curr) => acc + curr.deal_value, 0);
-  
+  const wonRevenue = wonLeads.reduce((acc, curr) => acc + (Number(curr.deal_value) || 0), 0);
+
   const activeLeads = leads.filter((l) => l.status !== 'lost');
-  const totalPipelineValue = activeLeads.reduce((acc, curr) => acc + curr.deal_value, 0);
+  const totalPipelineValue = activeLeads.reduce(
+    (acc, curr) => acc + (Number(curr.deal_value) || 0),
+    0
+  );
 
   return {
     totalLeads,
     newLeads,
     followUpsDue,
+    followUpsOverdue,
+    followUpsDueSoon,
     opportunitiesWon,
     totalPipelineValue,
     wonRevenue,

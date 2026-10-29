@@ -59,7 +59,7 @@ export default function TasksPage() {
                         type="button"
                         onClick={() => toggleTask(task.id)}
                         className="mt-0.5 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
-                        aria-label="Mark completed"
+                        aria-label={`Mark task "${task.title}" as complete`}
                       >
                         <Circle className="h-5 w-5 text-slate-300 hover:text-indigo-600" />
                       </button>
@@ -106,7 +106,7 @@ export default function TasksPage() {
                         type="button"
                         onClick={() => toggleTask(task.id)}
                         className="mt-0.5 text-emerald-600 cursor-pointer"
-                        aria-label="Mark pending"
+                        aria-label={`Mark task "${task.title}" as incomplete`}
                       >
                         <CheckCircle2 className="h-5 w-5" />
                       </button>

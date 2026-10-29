@@ -67,8 +67,17 @@ export function PipelineBoard() {
                   stageLeads.map((lead) => (
                     <div
                       key={lead.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setEditingLead(lead)}
-                      className="group rounded-lg border border-slate-200/90 bg-white p-3.5 shadow-2xs hover:shadow-xs hover:border-indigo-300 transition-all cursor-pointer"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setEditingLead(lead);
+                        }
+                      }}
+                      className="group rounded-lg border border-slate-200/90 bg-white p-3.5 shadow-2xs hover:shadow-xs hover:border-indigo-300 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+                      aria-label={`View and edit lead ${lead.name} (${lead.company})`}
                     >
                       <div className="flex items-start justify-between">
                         <span className="text-[11px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">

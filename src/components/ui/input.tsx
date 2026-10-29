@@ -8,7 +8,11 @@ export interface InputProps
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, error, icon, ...props }, ref) => {
+  ({ className, type, error, icon, id: providedId, 'aria-describedby': ariaDescribedBy, ...props }, ref) => {
+    const reactId = React.useId();
+    const id = providedId || reactId;
+    const errorId = `${id}-error`;
+
     return (
       <div className="relative w-full">
         {icon && (
@@ -17,7 +21,16 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           </div>
         )}
         <input
+          id={id}
           type={type}
+          aria-invalid={Boolean(error)}
+          aria-describedby={
+            error
+              ? ariaDescribedBy
+                ? `${ariaDescribedBy} ${errorId}`
+                : errorId
+              : ariaDescribedBy
+          }
           className={cn(
             'flex h-9 w-full rounded-lg border bg-white px-3 py-1 text-sm shadow-2xs transition-colors',
             'border-slate-300 placeholder:text-slate-400',
@@ -30,7 +43,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           {...props}
         />
-        {error && <p className="mt-1 text-xs text-rose-500">{error}</p>}
+        {error && (
+          <p id={errorId} className="mt-1 text-xs text-rose-500" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     );
   }
