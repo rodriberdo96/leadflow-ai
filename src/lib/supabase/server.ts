@@ -1,43 +1,55 @@
+import { createServerClient } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 import type { Database } from '@/types/database';
-import { isLiveSupabaseConfigured } from './client';
+import { isLiveSupabaseConfigured, supabaseUrl, supabaseAnonKey } from './client';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
 
 /**
  * Validates whether the privileged service role key is configured.
- * Never leaks to the client.
+ * Strictly server-only.
  */
 export function isSupabaseAdminConfigured(): boolean {
   if (typeof window !== 'undefined') {
-    return false; // Strictly server-only
+    return false;
   }
   if (!supabaseUrl || !supabaseServiceRoleKey) return false;
-  if (supabaseServiceRoleKey.includes('your-supabase') || supabaseServiceRoleKey.includes('placeholder')) {
+  if (
+    supabaseServiceRoleKey.includes('your-supabase') ||
+    supabaseServiceRoleKey.includes('placeholder')
+  ) {
     return false;
   }
   return isLiveSupabaseConfigured();
 }
 
 /**
- * Returns an authenticated Supabase server client scoped to a user session or token.
- * Uses ONLY the public anon key with the optional user's JWT authorization header.
- * NEVER falls back to the service-role key.
+ * Returns an authenticated Supabase server client reading from Next.js cookies via @supabase/ssr.
+ * Never falls back to the service-role key.
  */
-export function getSupabaseServerClient(jwtToken?: string): SupabaseClient<Database> | null {
+export async function getSupabaseServerClient(): Promise<SupabaseClient<Database> | null> {
   if (!isLiveSupabaseConfigured()) {
     return null;
   }
 
-  return createClient<Database>(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-    global: {
-      headers: jwtToken ? { Authorization: `Bearer ${jwtToken}` } : {},
+  const cookieStore = await cookies();
+
+  return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // The `setAll` method was called from a Server Component.
+          // This can be ignored if you have middleware refreshing sessions.
+        }
+      },
     },
   });
 }
