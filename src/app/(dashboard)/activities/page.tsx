@@ -10,7 +10,15 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 export default function ActivitiesPage() {
   const { activities, leads } = useLeads();
 
-  const getLeadName = (leadId: string) => {
+  const getLeadName = (leadId: string | null | undefined, metadata?: Record<string, unknown>) => {
+    if (!leadId) {
+      if (metadata && typeof metadata === 'object' && 'archived_lead_name' in metadata) {
+        const archivedName = metadata.archived_lead_name as string;
+        const archivedCompany = (metadata.archived_company as string) || 'Archived';
+        return `${archivedName} (${archivedCompany})`;
+      }
+      return 'Archived / General Activity';
+    }
     const lead = leads.find((l) => l.id === leadId);
     return lead ? `${lead.name} (${lead.company})` : 'Prospective Client';
   };
@@ -59,7 +67,7 @@ export default function ActivitiesPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                         <span className="text-xs font-bold text-slate-900">
-                          {getLeadName(act.lead_id)}
+                          {getLeadName(act.lead_id, act.metadata)}
                         </span>
                         <span className="text-[11px] text-slate-400">
                           {formatDate(act.created_at)}

@@ -309,7 +309,10 @@ export function DemoLeadsProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    setCurrentDate(new Date());
+    const timer = setTimeout(() => {
+      setCurrentDate(new Date());
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const metrics = useMemo(() => {

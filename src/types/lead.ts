@@ -37,7 +37,7 @@ export interface Lead {
 export interface LeadActivity {
   id: string;
   workspace_id: string;
-  lead_id: string;
+  lead_id: string | null;
   user_id?: string;
   type: 'note' | 'status_change' | 'email' | 'call' | 'meeting' | 'ai_summary' | 'ai_classification';
   description: string;

@@ -6,7 +6,6 @@ import type { LeadFormData } from '@/lib/validation/lead';
 import {
   supabaseLeadsService,
   supabaseTasksService,
-  supabaseActivitiesService,
   SupabaseServiceError,
 } from './supabase-leads-service';
 import { computeDashboardMetrics, type DashboardMetrics } from '../../dashboard/mock-data';
@@ -24,7 +23,7 @@ export interface ProductionLeadsContextType {
   deleteLead: (id: string) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
   refreshData: () => Promise<void>;
-  activeWorkspace: { id: string; name: string; role: string; slug: string };
+  activeWorkspace: { id: string; name: string; role: string; slug: string } | null;
 }
 
 const ProductionLeadsContext = createContext<ProductionLeadsContextType | undefined>(undefined);
@@ -38,8 +37,10 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
+  const workspaceId = activeWorkspace?.id;
+
   const refreshData = useCallback(async () => {
-    if (!activeWorkspace?.id || activeWorkspace.id === 'ws-demo-1') {
+    if (!workspaceId || workspaceId === 'ws-demo-1') {
       setIsLoading(false);
       return;
     }
@@ -49,9 +50,11 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
 
     try {
       const [loadedLeads, loadedTasks, loadedActivities] = await Promise.all([
-        supabaseLeadsService.getLeads(activeWorkspace.id),
-        supabaseTasksService.getTasks(activeWorkspace.id),
-        supabaseActivitiesService.getActivities(activeWorkspace.id),
+        supabaseLeadsService.getLeads(workspaceId),
+        supabaseTasksService.getTasks(workspaceId),
+        import('./supabase-leads-service').then((m) =>
+          m.supabaseActivitiesService.getActivities(workspaceId)
+        ),
       ]);
 
       setLeads(loadedLeads);
@@ -67,15 +70,22 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
     } finally {
       setIsLoading(false);
     }
-  }, [activeWorkspace?.id]);
+  }, [workspaceId]);
 
   useEffect(() => {
-    refreshData();
-  }, [refreshData]);
+    const timer = setTimeout(() => {
+      if (workspaceId && workspaceId !== 'ws-demo-1') {
+        void refreshData();
+      } else {
+        setIsLoading(false);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [workspaceId, refreshData]);
 
   const createLead = useCallback(
     async (data: LeadFormData): Promise<Lead> => {
-      if (!activeWorkspace?.id || activeWorkspace.id === 'ws-demo-1') {
+      if (!workspaceId || workspaceId === 'ws-demo-1') {
         throw new SupabaseServiceError('Cannot create production lead without an active real workspace.');
       }
 
@@ -90,7 +100,8 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
       }
 
       try {
-        const createdLead = await supabaseLeadsService.createLead(activeWorkspace.id, {
+        // Atomic single transaction on Postgres: lead + initial activity + follow-up task
+        const createdLead = await supabaseLeadsService.createLeadTransactional(workspaceId, {
           name: data.name.trim(),
           company: data.company.trim(),
           email: data.email.trim(),
@@ -103,25 +114,6 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
           notes: data.notes?.trim() || undefined,
         });
 
-        // Record activity in Supabase
-        await supabaseActivitiesService.createActivity(activeWorkspace.id, {
-          lead_id: createdLead.id,
-          type: 'note',
-          description: `Lead created for ${createdLead.company} (${createdLead.service})`,
-        });
-
-        // Automatically create follow-up task in Supabase if scheduled
-        if (validFollowUp) {
-          await supabaseTasksService.createTask(activeWorkspace.id, {
-            lead_id: createdLead.id,
-            lead_name: `${createdLead.name} (${createdLead.company})`,
-            title: `Follow up with ${createdLead.name} on ${createdLead.service}`,
-            due_date: validFollowUp,
-            completed: false,
-          });
-        }
-
-        // Refresh all synchronized data from server
         await refreshData();
         return createdLead;
       } catch (err) {
@@ -133,12 +125,12 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
         throw serviceError;
       }
     },
-    [activeWorkspace?.id, refreshData]
+    [workspaceId, refreshData]
   );
 
   const updateLead = useCallback(
     async (id: string, data: Partial<LeadFormData>): Promise<void> => {
-      if (!activeWorkspace?.id || activeWorkspace.id === 'ws-demo-1') {
+      if (!workspaceId || workspaceId === 'ws-demo-1') {
         throw new SupabaseServiceError('Cannot update production lead without an active real workspace.');
       }
 
@@ -157,70 +149,25 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
         }
       }
 
-      const statusChanged = Boolean(data.status && data.status !== previousLead.status);
-      const followUpChanged = previousLead.next_follow_up !== normalizedFollowUp;
+      const mergedLead: Lead = {
+        ...previousLead,
+        name: data.name !== undefined ? data.name.trim() : previousLead.name,
+        company: data.company !== undefined ? data.company.trim() : previousLead.company,
+        email: data.email !== undefined ? data.email.trim() : previousLead.email,
+        phone: data.phone !== undefined ? data.phone.trim() || undefined : previousLead.phone,
+        service: data.service !== undefined ? data.service : previousLead.service,
+        source: data.source !== undefined ? data.source : previousLead.source,
+        status: data.status !== undefined ? data.status : previousLead.status,
+        deal_value:
+          data.deal_value !== undefined ? Number(data.deal_value) || 0 : previousLead.deal_value,
+        next_follow_up: normalizedFollowUp,
+        notes: data.notes !== undefined ? data.notes.trim() || undefined : previousLead.notes,
+        updated_at: new Date().toISOString(),
+      };
 
       try {
-        const updatedLead = await supabaseLeadsService.updateLead(id, {
-          ...data,
-          name: data.name !== undefined ? data.name.trim() : previousLead.name,
-          company: data.company !== undefined ? data.company.trim() : previousLead.company,
-          email: data.email !== undefined ? data.email.trim() : previousLead.email,
-          phone: data.phone !== undefined ? data.phone.trim() || undefined : previousLead.phone,
-          deal_value:
-            data.deal_value !== undefined ? Number(data.deal_value) || 0 : previousLead.deal_value,
-          next_follow_up: normalizedFollowUp,
-          notes: data.notes !== undefined ? data.notes.trim() || undefined : previousLead.notes,
-        });
-
-        // 1. Record status change activity if applicable
-        if (statusChanged && data.status) {
-          await supabaseActivitiesService.createActivity(activeWorkspace.id, {
-            lead_id: id,
-            type: 'status_change',
-            description: `Status changed from ${previousLead.status} to ${data.status}`,
-          });
-        }
-
-        // 2. Synchronize related tasks
-        const leadTasks = tasks.filter((t) => t.lead_id === id);
-
-        if (updatedLead.status === 'won' || updatedLead.status === 'lost') {
-          // Auto-complete pending tasks
-          for (const task of leadTasks) {
-            if (!task.completed) {
-              await supabaseTasksService.updateTask(task.id, {
-                completed: true,
-                completed_at: new Date().toISOString(),
-              });
-            }
-          }
-        } else if (normalizedFollowUp) {
-          const pendingTask = leadTasks.find((t) => !t.completed);
-          if (pendingTask) {
-            await supabaseTasksService.updateTask(pendingTask.id, {
-              lead_name: `${updatedLead.name} (${updatedLead.company})`,
-              title: `Follow up with ${updatedLead.name} on ${updatedLead.service}`,
-              due_date: normalizedFollowUp,
-            });
-          } else if (followUpChanged) {
-            await supabaseTasksService.createTask(activeWorkspace.id, {
-              lead_id: updatedLead.id,
-              lead_name: `${updatedLead.name} (${updatedLead.company})`,
-              title: `Follow up with ${updatedLead.name} on ${updatedLead.service}`,
-              due_date: normalizedFollowUp,
-              completed: false,
-            });
-          }
-        } else if (data.next_follow_up === '' || data.next_follow_up === null) {
-          // Remove pending tasks if follow-up date was cleared
-          for (const task of leadTasks) {
-            if (!task.completed) {
-              await supabaseTasksService.deleteTask(task.id);
-            }
-          }
-        }
-
+        // Atomic single transaction on Postgres: lead update + status activity + task sync
+        await supabaseLeadsService.updateLeadTransactional(id, workspaceId, mergedLead);
         await refreshData();
       } catch (err) {
         const serviceError =
@@ -231,14 +178,19 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
         throw serviceError;
       }
     },
-    [activeWorkspace?.id, leads, tasks, refreshData]
+    [workspaceId, leads, refreshData]
   );
 
   const deleteLead = useCallback(
     async (id: string): Promise<void> => {
+      if (!workspaceId || workspaceId === 'ws-demo-1') {
+        throw new SupabaseServiceError('Cannot delete production lead without an active real workspace.');
+      }
+
       setError(null);
       try {
-        await supabaseLeadsService.deleteLead(id);
+        // Atomic deletion preserving workspace audit trail
+        await supabaseLeadsService.deleteLeadTransactional(id, workspaceId, true);
         await refreshData();
       } catch (err) {
         const serviceError =
@@ -249,7 +201,7 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
         throw serviceError;
       }
     },
-    [refreshData]
+    [workspaceId, refreshData]
   );
 
   const toggleTask = useCallback(
@@ -258,19 +210,18 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
       if (!task) return;
 
       setError(null);
-      const willComplete = !task.completed;
-
       try {
+        const nextCompleted = !task.completed;
         await supabaseTasksService.updateTask(id, {
-          completed: willComplete,
-          completed_at: willComplete ? new Date().toISOString() : undefined,
+          completed: nextCompleted,
+          completed_at: nextCompleted ? new Date().toISOString() : undefined,
         });
         await refreshData();
       } catch (err) {
         const serviceError =
           err instanceof Error
             ? err
-            : new SupabaseServiceError('Failed to toggle task in production database.');
+            : new SupabaseServiceError('Failed to update task status in production database.');
         setError(serviceError);
         throw serviceError;
       }
@@ -278,38 +229,52 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
     [tasks, refreshData]
   );
 
-  const [currentDate, setCurrentDate] = useState<Date>(
-    () => new Date('2026-10-26T12:00:00.000Z')
-  );
+  const [currentDate, setCurrentDate] = useState(() => new Date('2026-10-26T12:00:00Z'));
 
   useEffect(() => {
-    setCurrentDate(new Date());
+    const timer = setTimeout(() => {
+      setCurrentDate(new Date());
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const metrics = useMemo(() => {
     return computeDashboardMetrics(leads, currentDate);
   }, [leads, currentDate]);
 
-  return (
-    <ProductionLeadsContext.Provider
-      value={{
-        leads,
-        tasks,
-        activities,
-        metrics,
-        isLoading,
-        error,
-        createLead,
-        updateLead,
-        deleteLead,
-        toggleTask,
-        refreshData,
-        activeWorkspace,
-      }}
-    >
-      {children}
-    </ProductionLeadsContext.Provider>
+  const value = useMemo<ProductionLeadsContextType>(
+    () => ({
+      leads,
+      tasks,
+      activities,
+      metrics,
+      isLoading,
+      error,
+      createLead,
+      updateLead,
+      deleteLead,
+      toggleTask,
+      refreshData,
+      activeWorkspace:
+        activeWorkspace && activeWorkspace.id !== 'ws-demo-1' ? activeWorkspace : null,
+    }),
+    [
+      leads,
+      tasks,
+      activities,
+      metrics,
+      isLoading,
+      error,
+      createLead,
+      updateLead,
+      deleteLead,
+      toggleTask,
+      refreshData,
+      activeWorkspace,
+    ]
   );
+
+  return <ProductionLeadsContext.Provider value={value}>{children}</ProductionLeadsContext.Provider>;
 }
 
 export function useProductionLeads() {
@@ -319,4 +284,3 @@ export function useProductionLeads() {
   }
   return context;
 }
-

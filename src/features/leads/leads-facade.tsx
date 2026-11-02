@@ -22,7 +22,7 @@ export interface LeadsFacadeContextType {
   updateLead: (id: string, data: Partial<LeadFormData>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
-  activeWorkspace: { id: string; name: string; role: string; slug?: string };
+  activeWorkspace: { id: string; name: string; role: string; slug?: string } | null;
   isDemo: boolean;
 }
 

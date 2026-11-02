@@ -37,7 +37,7 @@ describe('Production Mode Supabase Services (Milestone 2)', () => {
     // Mock supabase client
     vi.spyOn(clientModule, 'getSupabaseBrowserClient').mockReturnValue({
       from: mockFrom,
-    } as any);
+    } as unknown as ReturnType<typeof clientModule.getSupabaseBrowserClient>);
 
     const leads = await supabaseLeadsService.getLeads(mockWorkspaceId);
 
@@ -59,7 +59,7 @@ describe('Production Mode Supabase Services (Milestone 2)', () => {
 
     vi.spyOn(clientModule, 'getSupabaseBrowserClient').mockReturnValue({
       from: mockFrom,
-    } as any);
+    } as unknown as ReturnType<typeof clientModule.getSupabaseBrowserClient>);
 
     await expect(supabaseLeadsService.getLeads(mockWorkspaceId)).rejects.toThrow(
       /Database connection timeout/
