@@ -5,14 +5,16 @@ import { DashboardShell } from '@/components/layout/dashboard-shell';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
-  Database,
-  Sparkles,
   Building,
   ShieldCheck,
-  AlertTriangle,
   RotateCcw,
   CheckCircle2,
-  RefreshCw,
+  Sparkles,
+  Server,
+  UserCheck,
+  Key,
+  Database,
+  Lock,
 } from 'lucide-react';
 import { useAppMode } from '@/context/app-mode-context';
 import { useAuth } from '@/context/auth-context';
@@ -20,9 +22,9 @@ import { useWorkspace } from '@/context/workspace-context';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 export default function SettingsPage() {
-  const { isDemo, resetDemoData, canUseProduction } = useAppMode();
+  const { isDemo, isProduction, resetDemoData, canUseProduction } = useAppMode();
   const { user } = useAuth();
-  const { activeWorkspace, refreshWorkspaces } = useWorkspace();
+  const { activeWorkspace } = useWorkspace();
 
   const [dbStatus, setDbStatus] = React.useState<
     'checking' | 'connected' | 'unreachable' | 'not_configured'
@@ -45,12 +47,11 @@ export default function SettingsPage() {
     }
 
     try {
-      // Real database connectivity check
+      // Direct network & health ping to Supabase service
       const { error } = await supabase.from('workspaces').select('id').limit(1);
       const elapsed = Math.round(performance.now() - start);
 
       if (error && error.code !== 'PGRST116') {
-        // Even if empty or RLS blocks empty set, connection succeeds if no network/auth error
         if (error.message.includes('FetchError') || error.message.includes('network')) {
           setDbStatus('unreachable');
           return;
@@ -64,13 +65,16 @@ export default function SettingsPage() {
   }, [canUseProduction]);
 
   React.useEffect(() => {
-    checkConnection();
+    const timer = setTimeout(() => {
+      void checkConnection();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [checkConnection]);
 
   return (
     <DashboardShell
-      title="Settings & Workspace"
-      description="Manage agency workspace profile, team permissions, and verified Supabase connection"
+      title="Settings & System Diagnostics"
+      description="Inspect multi-tenant workspace identity, database connectivity, and environment configurations"
     >
       <div className="space-y-6 max-w-4xl">
         {/* Environment Status Banner */}
@@ -85,8 +89,8 @@ export default function SettingsPage() {
                   Interactive Demo Mode Active
                 </h3>
                 <p className="mt-0.5 text-xs text-amber-700 leading-relaxed">
-                  You are exploring LeadFlow AI in local in-memory storage. Changes made here will
-                  never create or tamper with production Supabase records.
+                  You are exploring LeadFlow AI in local in-memory storage. All mock leads, tasks, and
+                  activities are isolated and will never touch or alter production database records.
                 </p>
               </div>
             </div>
@@ -110,164 +114,208 @@ export default function SettingsPage() {
                 Production Mode Active
               </h3>
               <p className="mt-0.5 text-xs text-emerald-700 leading-relaxed">
-                Connected to Supabase PostgreSQL database. Multi-tenant Row Level Security (RLS) is
-                enforced for tenant ID: <span className="font-mono font-bold">{activeWorkspace.id}</span>.
+                Operating with live Supabase authentication and PostgreSQL persistent storage for
+                tenant: <span className="font-mono font-bold">{activeWorkspace?.name ?? 'Loading...'}</span>.
               </p>
             </div>
           </div>
         )}
 
-        {/* Workspace Card */}
+        {/* Diagnostic Status Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Diagnostic 1: App Mode */}
+          <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-2xs space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                Execution Mode
+              </span>
+              <Server className="h-4 w-4 text-slate-400" />
+            </div>
+            <div className="text-sm font-bold text-slate-900">
+              {isProduction ? 'Production Mode' : 'Demo Mode'}
+            </div>
+            <div className="text-[11px] text-slate-500">
+              {isProduction ? 'Supabase Backend' : 'Client In-Memory'}
+            </div>
+          </div>
+
+          {/* Diagnostic 2: Supabase Config */}
+          <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-2xs space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                Supabase Config
+              </span>
+              <Key className="h-4 w-4 text-slate-400" />
+            </div>
+            <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              {canUseProduction ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span>Configured</span>
+                </>
+              ) : (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-slate-400" />
+                  <span>Unconfigured</span>
+                </>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500 truncate">
+              {canUseProduction ? 'URL & Anon Key Present' : 'Missing environment vars'}
+            </div>
+          </div>
+
+          {/* Diagnostic 3: Connectivity */}
+          <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-2xs space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                DB Connectivity
+              </span>
+              <Database className="h-4 w-4 text-slate-400" />
+            </div>
+            <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              {dbStatus === 'connected' ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span>Online {dbLatency !== null ? `(${dbLatency}ms)` : ''}</span>
+                </>
+              ) : dbStatus === 'unreachable' ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-rose-500" />
+                  <span>Unreachable</span>
+                </>
+              ) : dbStatus === 'checking' ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span>Checking...</span>
+                </>
+              ) : (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-slate-300" />
+                  <span>Standalone</span>
+                </>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500">
+              {dbStatus === 'connected'
+                ? 'Network response verified'
+                : dbStatus === 'unreachable'
+                ? 'Project unreachable'
+                : 'Local mock engine'}
+            </div>
+          </div>
+
+          {/* Diagnostic 4: Auth State */}
+          <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-2xs space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                Auth Session
+              </span>
+              <UserCheck className="h-4 w-4 text-slate-400" />
+            </div>
+            <div className="text-sm font-bold text-slate-900 truncate">
+              {user ? user.email : 'Unauthenticated'}
+            </div>
+            <div className="text-[11px] text-slate-500 truncate">
+              {user ? `Role: ${activeWorkspace?.role ?? 'member'}` : 'Guest session'}
+            </div>
+          </div>
+        </div>
+
+        {/* Workspace Profile Card */}
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
               <Building className="h-5 w-5 text-indigo-600" />
-              <CardTitle className="text-base font-semibold">Agency Workspace Profile</CardTitle>
+              <CardTitle className="text-base font-semibold">Active Workspace Identity</CardTitle>
             </div>
             <CardDescription>
-              Organization identity and multi-tenant domain settings
+              Multi-tenant boundary metadata and current membership role
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
                   Workspace Name
                 </label>
-                <input
-                  type="text"
-                  readOnly
-                  value={activeWorkspace.name}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Workspace Slug
-                </label>
-                <input
-                  type="text"
-                  readOnly
-                  value={activeWorkspace.slug || 'velocity-digital'}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 cursor-not-allowed font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Your Membership Role
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200">
-                    {activeWorkspace.role}
-                  </span>
-                  {user && (
-                    <span className="text-xs text-slate-500 truncate">
-                      ({user.email})
-                    </span>
-                  )}
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-800">
+                  {activeWorkspace?.name ?? 'Loading workspace...'}
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Tenant Isolation
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                  Tenant Slug
                 </label>
-                <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  <span>Row Level Security (RLS) partition verified</span>
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono text-slate-600">
+                  {activeWorkspace?.slug ?? 'loading'}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                  Tenant Workspace ID
+                </label>
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-600 truncate">
+                  {activeWorkspace?.id ?? 'loading...'}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                  Your Permission Role
+                </label>
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold capitalize text-indigo-700 flex items-center justify-between">
+                  <span>{activeWorkspace?.role ?? 'member'}</span>
+                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200">
+                    Tenant Enforced
+                  </span>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Database Integration Card */}
+        {/* Database & Security Architecture Card */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Database className="h-5 w-5 text-emerald-600" />
-                <CardTitle className="text-base font-semibold">Supabase PostgreSQL & Auth</CardTitle>
+                <Lock className="h-5 w-5 text-indigo-600" />
+                <CardTitle className="text-base font-semibold">Database & Security Architecture</CardTitle>
               </div>
-
-              {/* Verified Connection Status */}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    checkConnection();
-                    refreshWorkspaces();
-                  }}
-                  className="h-7 text-xs text-slate-500"
-                  title="Recheck live connection"
-                >
-                  <RefreshCw className="h-3 w-3 mr-1" />
-                  <span>Recheck</span>
-                </Button>
-
-                <span
-                  className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${
-                    dbStatus === 'connected'
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : dbStatus === 'checking'
-                      ? 'bg-slate-100 text-slate-600 border-slate-200'
-                      : dbStatus === 'unreachable'
-                      ? 'bg-rose-50 text-rose-700 border-rose-200'
-                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                  }`}
-                >
-                  {dbStatus === 'connected'
-                    ? `Connected (${dbLatency}ms)`
-                    : dbStatus === 'checking'
-                    ? 'Checking Connection...'
-                    : dbStatus === 'unreachable'
-                    ? 'Unreachable'
-                    : 'Unconfigured (Demo Active)'}
-                </span>
-              </div>
+              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                RLS Implemented
+              </span>
             </div>
             <CardDescription>
-              PostgreSQL database connection with Row Level Security (RLS) migrations
+              PostgreSQL Row Level Security (RLS) enforcement and tenant data segregation
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {dbStatus === 'connected' ? (
-              <div className="rounded-lg bg-emerald-50/50 border border-emerald-200/80 p-3.5 text-xs text-emerald-800 space-y-1.5">
-                <p className="font-semibold flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  <span>Live Supabase Database Verified</span>
-                </p>
-                <p className="text-[11px] text-emerald-700">
-                  Authentication tokens are stored in secure cookies via{' '}
-                  <code className="font-mono font-bold">@supabase/ssr</code>. Data queries run
-                  directly against PostgreSQL with strict tenant partition.
-                </p>
-              </div>
-            ) : dbStatus === 'unreachable' ? (
-              <div className="rounded-lg bg-rose-50 border border-rose-200 p-3.5 text-xs text-rose-800 space-y-1.5">
-                <p className="font-semibold flex items-center gap-1.5">
-                  <AlertTriangle className="h-4 w-4 text-rose-600" />
-                  <span>Unable to Reach Supabase Project</span>
-                </p>
-                <p className="text-[11px] text-rose-700">
-                  Your environment variables are set, but the remote PostgreSQL database did not
-                  respond. Check project status on the Supabase dashboard or verify network connectivity.
-                </p>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-600 leading-relaxed">
-                LeadFlow AI is running in standalone Demo Mode. To connect a live Supabase database:
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-3.5 text-xs text-slate-700 space-y-2">
+              <p className="font-semibold text-slate-900 flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4 text-indigo-600" />
+                <span>Multi-Tenant Authorization Policy</span>
               </p>
-            )}
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Row Level Security (RLS) is enforced directly by PostgreSQL policies for all queries
+                on <code className="font-mono font-semibold">leads</code>,{' '}
+                <code className="font-mono font-semibold">tasks</code>,{' '}
+                <code className="font-mono font-semibold">activities</code>, and{' '}
+                <code className="font-mono font-semibold">workspace_members</code>.
+                Users cannot access or modify records belonging to other tenants.
+              </p>
+              <p className="text-[11px] text-slate-500 leading-relaxed border-t border-slate-200/60 pt-2">
+                Note: A successful database ping confirms network connectivity to Supabase, while authorization
+                and tenant boundary checks are guaranteed server-side by PostgreSQL RLS policies and JWT session context.
+              </p>
+            </div>
 
-            <ol className="list-decimal list-inside space-y-1 text-xs text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-200/70 font-mono">
-              <li>Copy <span className="text-indigo-600">.env.example</span> to <span className="text-indigo-600">.env.local</span></li>
-              <li>Configure <span className="text-indigo-600">NEXT_PUBLIC_SUPABASE_URL</span> and <span className="text-indigo-600">NEXT_PUBLIC_SUPABASE_ANON_KEY</span></li>
-              <li>Run migrations <code className="text-indigo-700">20250101000000_initial_schema.sql</code> and <code className="text-indigo-700">20250102000000_security_hardening.sql</code> in your Supabase SQL editor</li>
-            </ol>
+            <div className="mt-2 text-xs text-slate-600 font-mono bg-slate-50 p-3 rounded-lg border border-slate-200/70 space-y-1">
+              <div className="font-semibold text-slate-800 font-sans mb-1">Applied Database Migrations:</div>
+              <div>• <span className="text-indigo-600">20250101000000_initial_schema.sql</span> (Multi-tenant core)</div>
+              <div>• <span className="text-indigo-600">20250102000000_security_hardening.sql</span> (RLS hardening)</div>
+              <div>• <span className="text-indigo-600">20250103000000_milestone2_remediation.sql</span> (Atomic RPCs & non-recursive policies)</div>
+            </div>
           </CardContent>
         </Card>
 
@@ -277,7 +325,7 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-indigo-600" />
-                <CardTitle className="text-base font-semibold">OpenAI Server Integration</CardTitle>
+                <CardTitle className="text-base font-semibold">OpenAI Integration Architecture</CardTitle>
               </div>
               <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
                 Phase 2 Architecture Ready

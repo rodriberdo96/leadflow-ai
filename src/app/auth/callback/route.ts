@@ -3,13 +3,28 @@ import { createServerClient } from '@supabase/ssr';
 import { supabaseUrl, supabaseAnonKey, isLiveSupabaseConfigured } from '@/lib/supabase/client';
 import type { Database } from '@/types/database';
 
+function getSafeRedirectPath(candidate: string | null): string {
+  if (!candidate) return '/dashboard';
+  // Strictly prevent open redirects: must start with single '/', no '//', no backslashes, no URI schemes
+  if (
+    candidate.startsWith('/') &&
+    !candidate.startsWith('//') &&
+    !candidate.startsWith('/\\') &&
+    !candidate.includes(':') &&
+    !candidate.includes('\\')
+  ) {
+    return candidate;
+  }
+  return '/dashboard';
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/dashboard';
+  const safeNext = getSafeRedirectPath(searchParams.get('next'));
 
   if (code && isLiveSupabaseConfigured()) {
-    const response = NextResponse.redirect(`${origin}${next}`);
+    const response = NextResponse.redirect(`${origin}${safeNext}`);
 
     const supabase = createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
       cookies: {

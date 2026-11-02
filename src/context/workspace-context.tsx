@@ -1,6 +1,14 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
 import type { Workspace, WorkspaceMember } from '@/types/workspace';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useAuth } from './auth-context';
@@ -14,7 +22,7 @@ export interface ActiveWorkspace {
 }
 
 interface WorkspaceContextType {
-  activeWorkspace: ActiveWorkspace;
+  activeWorkspace: ActiveWorkspace | null;
   workspaces: Workspace[];
   memberships: WorkspaceMember[];
   isLoading: boolean;
@@ -23,7 +31,7 @@ interface WorkspaceContextType {
   refreshWorkspaces: () => Promise<void>;
 }
 
-const DEMO_WORKSPACE: ActiveWorkspace = {
+export const DEMO_WORKSPACE: ActiveWorkspace = {
   id: 'ws-demo-1',
   name: 'Velocity Digital Agency',
   slug: 'velocity-digital',
@@ -45,111 +53,142 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { isProduction } = useAppMode();
 
-  const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace>(DEMO_WORKSPACE);
+  // In production, activeWorkspace must NEVER accidentally be DEMO_WORKSPACE
+  const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace | null>(() => {
+    return isProduction ? null : DEMO_WORKSPACE;
+  });
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [memberships, setMemberships] = useState<WorkspaceMember[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const supabase = getSupabaseBrowserClient();
+  const creationInProgressRef = useRef(false);
+  const inFlightRefreshRef = useRef<Promise<void> | null>(null);
 
-  const refreshWorkspaces = useCallback(async () => {
+  const supabaseClient = getSupabaseBrowserClient();
+  const supabase = supabaseClient as unknown as import('@supabase/supabase-js').SupabaseClient | null;
+
+  const refreshWorkspaces = useCallback(async (): Promise<void> => {
     if (!isProduction || !user || !supabase) {
       setActiveWorkspace(DEMO_WORKSPACE);
       setWorkspaces([]);
       setMemberships([]);
+      setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // 1. Fetch user memberships
-      const { data: memberRows, error: memberErr } = await supabase
-        .from('workspace_members')
-        .select('*')
-        .eq('user_id', user.id);
-
-      if (memberErr) throw new Error(memberErr.message);
-
-      const membershipsList = (memberRows as unknown as WorkspaceMember[]) || [];
-      setMemberships(membershipsList);
-
-      if (!membershipsList || membershipsList.length === 0) {
-        // User has no workspace yet -> check user metadata to auto-create onboarding workspace
-        const companyName =
-          (user.user_metadata?.company_name as string) ||
-          `${user.user_metadata?.full_name || 'My'}'s Agency`;
-
-        const newSlug = `${slugify(companyName)}-${Date.now().toString(36)}`;
-
-        // Call RPC create_workspace
-        const { data: newWsId, error: createErr } = await (supabase.rpc as any)(
-          'create_workspace',
-          {
-            name: companyName,
-            slug: newSlug,
-          }
-        );
-
-        if (createErr) {
-          throw new Error(`Failed to initialize default workspace: ${createErr.message}`);
-        }
-
-        // Recursively refresh after creation
-        const { data: createdWs } = await supabase
-          .from('workspaces')
-          .select('*')
-          .eq('id', newWsId as string)
-          .single();
-
-        if (createdWs) {
-          const ws = createdWs as Workspace;
-          setWorkspaces([ws]);
-          setActiveWorkspace({
-            id: ws.id,
-            name: ws.name,
-            slug: ws.slug,
-            role: 'owner',
-          });
-        }
-      } else {
-        // 2. User has existing memberships -> fetch the workspaces
-        const wsIds = membershipsList.map((m) => m.workspace_id);
-        const { data: wsRows, error: wsErr } = await supabase
-          .from('workspaces')
-          .select('*')
-          .in('id', wsIds);
-
-        if (wsErr) throw new Error(wsErr.message);
-
-        const loadedWorkspaces = (wsRows as unknown as Workspace[]) || [];
-        setWorkspaces(loadedWorkspaces);
-
-        // Select the first workspace or preserve active if matching
-        if (loadedWorkspaces.length > 0) {
-          const firstWs = loadedWorkspaces[0];
-          const matchedMember = membershipsList.find((m) => m.workspace_id === firstWs.id);
-          setActiveWorkspace({
-            id: firstWs.id,
-            name: firstWs.name,
-            slug: firstWs.slug,
-            role: (matchedMember?.role as 'owner' | 'admin' | 'member') || 'member',
-          });
-        }
-      }
-    } catch (err) {
-      console.error('[WorkspaceProvider] Error fetching workspaces:', err);
-      setError(err instanceof Error ? err : new Error('Failed to load workspace.'));
-    } finally {
-      setIsLoading(false);
+    if (inFlightRefreshRef.current) {
+      return inFlightRefreshRef.current;
     }
+
+    const refreshPromise = (async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // 1. Fetch user memberships
+        const { data: memberRows, error: memberErr } = await supabase
+          .from('workspace_members')
+          .select('*')
+          .eq('user_id', user.id);
+
+        if (memberErr) throw new Error(memberErr.message);
+
+        const membershipsList = (memberRows as unknown as WorkspaceMember[]) || [];
+        setMemberships(membershipsList);
+
+        if (!membershipsList || membershipsList.length === 0) {
+          // Guard against concurrent creation races
+          if (creationInProgressRef.current) {
+            return;
+          }
+          creationInProgressRef.current = true;
+
+          try {
+            const companyName =
+              (user.user_metadata?.company_name as string) ||
+              `${(user.user_metadata?.full_name as string) || 'My'}'s Agency`;
+
+            const newSlug = `${slugify(companyName)}-${Date.now().toString(36)}`;
+
+            const { data: newWsId, error: createErr } = await supabase.rpc('create_workspace', {
+              name: companyName,
+              slug: newSlug,
+            });
+
+            if (createErr) {
+              throw new Error(`Failed to initialize default workspace: ${createErr.message}`);
+            }
+
+            const { data: createdWs } = await supabase
+              .from('workspaces')
+              .select('*')
+              .eq('id', newWsId)
+              .single();
+
+            if (createdWs) {
+              const ws = createdWs as unknown as Workspace;
+              setWorkspaces([ws]);
+              setActiveWorkspace({
+                id: ws.id,
+                name: ws.name,
+                slug: ws.slug,
+                role: 'owner',
+              });
+            }
+          } finally {
+            creationInProgressRef.current = false;
+          }
+        } else {
+          // User has existing memberships -> fetch the workspaces
+          const wsIds = membershipsList.map((m) => m.workspace_id);
+          const { data: wsRows, error: wsErr } = await supabase
+            .from('workspaces')
+            .select('*')
+            .in('id', wsIds);
+
+          if (wsErr) throw new Error(wsErr.message);
+
+          const loadedWorkspaces = (wsRows as unknown as Workspace[]) || [];
+          setWorkspaces(loadedWorkspaces);
+
+          if (loadedWorkspaces.length > 0) {
+            const firstWs = loadedWorkspaces[0];
+            const matchedMember = membershipsList.find((m) => m.workspace_id === firstWs.id);
+            setActiveWorkspace({
+              id: firstWs.id,
+              name: firstWs.name,
+              slug: firstWs.slug,
+              role: (matchedMember?.role as 'owner' | 'admin' | 'member') || 'member',
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[WorkspaceProvider] Error fetching workspaces:', err);
+        setError(err instanceof Error ? err : new Error('Failed to load workspace.'));
+      } finally {
+        setIsLoading(false);
+        inFlightRefreshRef.current = null;
+      }
+    })();
+
+    inFlightRefreshRef.current = refreshPromise;
+    return refreshPromise;
   }, [isProduction, user, supabase]);
 
   useEffect(() => {
-    refreshWorkspaces();
-  }, [refreshWorkspaces]);
+    const timer = setTimeout(() => {
+      if (isProduction && user) {
+        void refreshWorkspaces();
+      } else {
+        setActiveWorkspace(DEMO_WORKSPACE);
+        setWorkspaces([]);
+        setMemberships([]);
+        setIsLoading(false);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isProduction, user, refreshWorkspaces]);
 
   const createWorkspace = useCallback(
     async (name: string, customSlug?: string): Promise<{ workspaceId?: string; error?: Error }> => {
@@ -158,21 +197,22 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       }
 
       setIsLoading(true);
-      setError(null);
-
       try {
-        const slug = customSlug?.trim() || `${slugify(name)}-${Date.now().toString(36)}`;
-        const { data: newWsId, error: rpcErr } = await (supabase.rpc as any)('create_workspace', {
+        const finalSlug = customSlug ? slugify(customSlug) : `${slugify(name)}-${Date.now().toString(36)}`;
+
+        const { data: newId, error: rpcErr } = await supabase.rpc('create_workspace', {
           name: name.trim(),
-          slug,
+          slug: finalSlug,
         });
 
-        if (rpcErr) throw new Error(rpcErr.message);
+        if (rpcErr) {
+          throw new Error(rpcErr.message);
+        }
 
         await refreshWorkspaces();
-        return { workspaceId: newWsId as string };
+        return { workspaceId: newId as string };
       } catch (err) {
-        const createError = err instanceof Error ? err : new Error('Failed to create workspace');
+        const createError = err instanceof Error ? err : new Error('Failed to create workspace.');
         setError(createError);
         return { error: createError };
       } finally {
@@ -182,21 +222,20 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     [isProduction, user, supabase, refreshWorkspaces]
   );
 
-  return (
-    <WorkspaceContext.Provider
-      value={{
-        activeWorkspace,
-        workspaces,
-        memberships,
-        isLoading,
-        error,
-        createWorkspace,
-        refreshWorkspaces,
-      }}
-    >
-      {children}
-    </WorkspaceContext.Provider>
+  const value = useMemo<WorkspaceContextType>(
+    () => ({
+      activeWorkspace,
+      workspaces,
+      memberships,
+      isLoading,
+      error,
+      createWorkspace,
+      refreshWorkspaces,
+    }),
+    [activeWorkspace, workspaces, memberships, isLoading, error, createWorkspace, refreshWorkspaces]
   );
+
+  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
 export function useWorkspace() {
