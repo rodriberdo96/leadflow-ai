@@ -28,7 +28,10 @@ export function MetricsOverview() {
     {
       title: 'Follow-ups Due',
       value: metrics.followUpsDue,
-      description: 'Scheduled reminders & tasks',
+      description:
+        metrics.followUpsDue > 0
+          ? `${metrics.followUpsOverdue} overdue · ${metrics.followUpsDueSoon} due in 48h`
+          : 'All scheduled follow-ups clear',
       icon: Clock,
       iconColor: 'text-amber-600',
       iconBg: 'bg-amber-50 border-amber-100',
