@@ -1,8 +1,9 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
+export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || '';
+export const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
 
 /**
  * Validates whether live Supabase client credentials are fully and authentically configured.
@@ -21,13 +22,12 @@ export function isLiveSupabaseConfigured(): boolean {
 }
 
 export const isSupabaseConfigured = isLiveSupabaseConfigured();
-export const isDemoMode = !isSupabaseConfigured;
 
 let cachedBrowserClient: SupabaseClient<Database> | null = null;
 
 /**
- * Returns a Supabase browser client if configured, or null in demo mode.
- * Never creates clients with fake/placeholder URLs.
+ * Returns a typed Supabase browser client with cookie handling via @supabase/ssr,
+ * or null when credentials are not authentically configured.
  */
 export function getSupabaseBrowserClient(): SupabaseClient<Database> | null {
   if (!isLiveSupabaseConfigured()) {
@@ -35,13 +35,7 @@ export function getSupabaseBrowserClient(): SupabaseClient<Database> | null {
   }
 
   if (!cachedBrowserClient) {
-    cachedBrowserClient = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    });
+    cachedBrowserClient = createBrowserClient<Database>(supabaseUrl, supabaseAnonKey);
   }
 
   return cachedBrowserClient;

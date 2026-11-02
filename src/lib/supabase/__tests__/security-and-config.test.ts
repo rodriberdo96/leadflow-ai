@@ -31,9 +31,9 @@ describe('Supabase Configuration & Multi-Tenant Security Baseline (Phase 5 & 6)'
       expect(() => getSupabaseAdminClient()).toThrow(/SUPABASE_SERVICE_ROLE_KEY is missing or invalid/i);
     });
 
-    it('getSupabaseServerClient does not fall back to privileged service-role key', () => {
+    it('getSupabaseServerClient does not fall back to privileged service-role key', async () => {
       // When unconfigured, returns null instead of falling back to a dummy or admin key
-      const client = getSupabaseServerClient();
+      const client = await getSupabaseServerClient();
       expect(client).toBeNull();
     });
   });

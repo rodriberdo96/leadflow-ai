@@ -13,9 +13,13 @@ import {
   Sparkles,
   ChevronRight,
   Layers,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLeads } from '@/features/leads/leads-context';
+import { useAuth } from '@/context/auth-context';
+import { useWorkspace } from '@/context/workspace-context';
+import { useAppMode } from '@/context/app-mode-context';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -59,73 +63,64 @@ const NAV_ITEMS = [
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { metrics, activeWorkspace } = useLeads();
+  const { metrics } = useLeads();
+  const { user, signOut } = useAuth();
+  const { activeWorkspace } = useWorkspace();
+  const { isDemo } = useAppMode();
+
+  const userDisplayName = isDemo
+    ? 'Agency Director (Demo)'
+    : user?.user_metadata?.full_name || 'Agency Member';
+
+  const userEmail = isDemo ? 'demo@velocityagency.com' : user?.email || 'authenticated-user';
+
+  const userInitials = userDisplayName
+    .split(' ')
+    .map((n: string) => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
   return (
     <>
-      {/* Mobile backdrop */}
+      {/* Mobile Backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs lg:hidden"
           onClick={onClose}
+          aria-hidden="true"
         />
       )}
 
+      {/* Main Sidebar Shell */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200/90 bg-white transition-transform duration-200 ease-in-out lg:static lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200/90 bg-white transition-transform duration-200 ease-in-out lg:static lg:translate-x-0',
           isOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        {/* Brand Header */}
+        {/* Brand / Logo Header */}
         <div className="flex h-16 items-center justify-between border-b border-slate-100 px-5">
           <Link href="/dashboard" className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
-              <Layers className="h-5 w-5" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white font-bold shadow-xs">
+              <Layers className="h-4.5 w-4.5" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-slate-900 tracking-tight text-base">
-                  LeadFlow
-                </span>
-                <span className="rounded bg-indigo-50 px-1.5 py-0.2 text-[10px] font-semibold text-indigo-600 border border-indigo-200/50">
-                  AI
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-400 font-medium">B2B Agency Growth</p>
+              <span className="text-base font-bold tracking-tight text-slate-900">
+                LeadFlow <span className="text-indigo-600">AI</span>
+              </span>
+              <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                {isDemo ? 'Demo Experience' : activeWorkspace?.role || 'Agency Workspace'}
+              </span>
             </div>
           </Link>
         </div>
 
-        {/* Agency Workspace Switcher */}
-        <div className="p-3 border-b border-slate-100">
-          <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2 border border-slate-200/60">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-semibold text-slate-800">
-                {activeWorkspace.name}
-              </p>
-              <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>{activeWorkspace.role}</span>
-              </div>
-            </div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-              SaaS
-            </span>
-          </div>
-        </div>
-
-        {/* Navigation Links */}
-        <nav className="flex-1 space-y-1 p-3 overflow-y-auto">
-          <div className="px-3 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-            Navigation
-          </div>
-
+        {/* Navigation Items */}
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {NAV_ITEMS.map((item) => {
-            const isActive =
-              pathname === item.href ||
-              (item.href !== '/dashboard' && pathname.startsWith(item.href));
             const Icon = item.icon;
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const badgeValue = item.badgeKey ? metrics[item.badgeKey] : null;
 
             return (
@@ -134,13 +129,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 href={item.href}
                 onClick={onClose}
                 className={cn(
-                  'group flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  'group flex items-center justify-between rounded-lg px-3 py-2 text-xs font-semibold transition-colors',
                   isActive
-                    ? 'bg-indigo-50 text-indigo-700 font-semibold'
+                    ? 'bg-indigo-50 text-indigo-700 shadow-2xs font-bold'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                 )}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
                   <Icon
                     className={cn(
                       'h-4 w-4 shrink-0 transition-colors',
@@ -186,18 +181,30 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* Footer User Info */}
         <div className="border-t border-slate-100 p-3">
-          <div className="flex items-center gap-3 rounded-lg p-2 hover:bg-slate-50 transition-colors">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
-              AD
+          <div className="flex items-center justify-between rounded-lg p-2 hover:bg-slate-50 transition-colors">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700 shrink-0">
+                {userInitials || 'AG'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold text-slate-800">
+                  {userDisplayName}
+                </p>
+                <p className="truncate text-[11px] text-slate-500">{userEmail}</p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-semibold text-slate-800">
-                Agency Director
-              </p>
-              <p className="truncate text-[11px] text-slate-500">
-                alex@velocityagency.com
-              </p>
-            </div>
+
+            {!isDemo && user && (
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="rounded-md p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                title="Sign out"
+                aria-label="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </aside>
