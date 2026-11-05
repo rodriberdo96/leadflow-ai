@@ -142,48 +142,87 @@ describe('Milestone 2 QA Remediation - Data Integrity & Task Consistency', () =>
       expect(lead.id).toBe('lead-atomic-1');
     });
 
-    it('falls back cleanly to createLead if RPC returns error', async () => {
+    it('strictly propagates error on createLeadTransactional failure without executing unsafe fallbacks', async () => {
       const mockRpc = vi.fn().mockResolvedValue({
         data: null,
-        error: { message: 'function create_lead_transactional does not exist' },
+        error: { message: 'function create_lead_transactional does not exist or permission denied' },
       });
 
-      const mockSingle = vi.fn().mockResolvedValue({
-        data: {
-          id: 'lead-fallback-1',
-          workspace_id: mockWorkspaceId,
-          name: 'Fallback Lead',
-          company: 'Fallback Co',
-          email: 'fb@example.com',
-          service: 'SEO',
-          source: 'Organic',
-          status: 'new',
-          deal_value: 1200,
-        },
-        error: null,
-      });
-      const mockSelect = vi.fn().mockReturnValue({ single: mockSingle });
-      const mockInsert = vi.fn().mockReturnValue({ select: mockSelect });
-      const mockFrom = vi.fn().mockReturnValue({ insert: mockInsert });
+      const mockFrom = vi.fn();
 
       vi.spyOn(clientModule, 'getSupabaseBrowserClient').mockReturnValue({
         rpc: mockRpc,
         from: mockFrom,
       } as unknown as ReturnType<typeof clientModule.getSupabaseBrowserClient>);
 
-      const lead = await supabaseLeadsService.createLeadTransactional(mockWorkspaceId, {
-        name: 'Fallback Lead',
-        company: 'Fallback Co',
-        email: 'fb@example.com',
-        service: 'SEO',
-        source: 'Organic',
-        status: 'new',
-        deal_value: 1200,
-      });
+      await expect(
+        supabaseLeadsService.createLeadTransactional(mockWorkspaceId, {
+          name: 'Strict Lead',
+          company: 'Strict Co',
+          email: 'strict@example.com',
+          service: 'SEO',
+          source: 'Organic',
+          status: 'new',
+          deal_value: 1200,
+        })
+      ).rejects.toThrow(/Transactional lead creation failed: function create_lead_transactional does not exist/);
 
       expect(mockRpc).toHaveBeenCalled();
-      expect(mockFrom).toHaveBeenCalledWith('leads');
-      expect(lead.id).toBe('lead-fallback-1');
+      // Crucial security guarantee: NO non-transactional fallback table operations must ever be attempted
+      expect(mockFrom).not.toHaveBeenCalled();
+    });
+
+    it('strictly propagates error on updateLeadTransactional failure without fallback', async () => {
+      const mockRpc = vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: 'Access denied: caller is not a member of workspace' },
+      });
+
+      const mockFrom = vi.fn();
+
+      vi.spyOn(clientModule, 'getSupabaseBrowserClient').mockReturnValue({
+        rpc: mockRpc,
+        from: mockFrom,
+      } as unknown as ReturnType<typeof clientModule.getSupabaseBrowserClient>);
+
+      await expect(
+        supabaseLeadsService.updateLeadTransactional('lead-1', mockWorkspaceId, {
+          id: 'lead-1',
+          workspace_id: mockWorkspaceId,
+          name: 'Updated Lead',
+          company: 'Updated Co',
+          email: 'updated@example.com',
+          service: 'SEO',
+          source: 'Organic',
+          status: 'proposal',
+          deal_value: 2000,
+          created_at: '2026-11-01T10:00:00Z',
+          updated_at: '2026-11-02T10:00:00Z',
+        })
+      ).rejects.toThrow(/Transactional lead update failed/);
+
+      expect(mockRpc).toHaveBeenCalled();
+      expect(mockFrom).not.toHaveBeenCalled();
+    });
+
+    it('strictly propagates error on deleteLeadTransactional failure without fallback', async () => {
+      const mockRpc = vi.fn().mockResolvedValue({
+        error: { message: 'Foreign key or permission error' },
+      });
+
+      const mockFrom = vi.fn();
+
+      vi.spyOn(clientModule, 'getSupabaseBrowserClient').mockReturnValue({
+        rpc: mockRpc,
+        from: mockFrom,
+      } as unknown as ReturnType<typeof clientModule.getSupabaseBrowserClient>);
+
+      await expect(
+        supabaseLeadsService.deleteLeadTransactional('lead-1', mockWorkspaceId, true)
+      ).rejects.toThrow(/Transactional lead deletion failed/);
+
+      expect(mockRpc).toHaveBeenCalled();
+      expect(mockFrom).not.toHaveBeenCalled();
     });
   });
 
