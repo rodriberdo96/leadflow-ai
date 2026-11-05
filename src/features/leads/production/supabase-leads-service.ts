@@ -90,8 +90,10 @@ export const supabaseLeadsService = {
     });
 
     if (error) {
-      // If RPC is missing or fails, fall back cleanly to granular createLead
-      return await this.createLead(workspaceId, leadData);
+      throw new SupabaseServiceError(
+        `Transactional lead creation failed: ${error.message}`,
+        error
+      );
     }
 
     return data as unknown as Lead;
@@ -140,8 +142,10 @@ export const supabaseLeadsService = {
     });
 
     if (error) {
-      // Fallback to standard update
-      return await this.updateLead(id, updates);
+      throw new SupabaseServiceError(
+        `Transactional lead update failed: ${error.message}`,
+        error
+      );
     }
 
     return data as unknown as Lead;
@@ -169,8 +173,10 @@ export const supabaseLeadsService = {
     });
 
     if (error) {
-      // Fallback to standard deleteLead
-      await this.deleteLead(id);
+      throw new SupabaseServiceError(
+        `Transactional lead deletion failed: ${error.message}`,
+        error
+      );
     }
   },
 };
