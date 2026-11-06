@@ -45,6 +45,8 @@ export interface LeadActivity {
   created_at: string;
 }
 
+export type TaskType = 'system_follow_up' | 'manual';
+
 export interface LeadTask {
   id: string;
   workspace_id: string;
@@ -56,4 +58,5 @@ export interface LeadTask {
   completed: boolean;
   completed_at?: string;
   created_at: string;
+  task_type?: TaskType;
 }
