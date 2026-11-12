@@ -148,6 +148,7 @@ export function DemoLeadsProvider({ children }: { children: React.ReactNode }) {
           title: `Follow up with ${newLead.name} on ${newLead.service}`,
           due_date: validFollowUp,
           completed: false,
+          task_type: 'system_follow_up',
           created_at: now,
         };
         setTasks((prev) => [newTask, ...prev]);
@@ -213,7 +214,7 @@ export function DemoLeadsProvider({ children }: { children: React.ReactNode }) {
 
           if (updatedLead.status === 'won' || updatedLead.status === 'lost') {
             const updatedLeadTasks = leadTasks.map((task) => {
-              if (task.completed) return task;
+              if (task.completed || task.task_type !== 'system_follow_up') return task;
               return {
                 ...task,
                 completed: true,
@@ -224,10 +225,12 @@ export function DemoLeadsProvider({ children }: { children: React.ReactNode }) {
           }
 
           if (normalizedFollowUp) {
-            const pendingTaskIndex = leadTasks.findIndex((t) => !t.completed);
-            if (pendingTaskIndex !== -1) {
+            const pendingSystemTaskIndex = leadTasks.findIndex(
+              (t) => !t.completed && t.task_type === 'system_follow_up'
+            );
+            if (pendingSystemTaskIndex !== -1) {
               const updatedLeadTasks = leadTasks.map((task, idx) => {
-                if (idx === pendingTaskIndex) {
+                if (idx === pendingSystemTaskIndex) {
                   return {
                     ...task,
                     lead_name: `${updatedLead.name} (${updatedLead.company})`,
@@ -250,13 +253,23 @@ export function DemoLeadsProvider({ children }: { children: React.ReactNode }) {
                 title: `Follow up with ${updatedLead.name} on ${updatedLead.service}`,
                 due_date: normalizedFollowUp,
                 completed: false,
+                task_type: 'system_follow_up',
                 created_at: now,
               };
-              return [newTask, ...prevTasks];
+              const updatedExisting = leadTasks.map((task) => ({
+                ...task,
+                lead_name: `${updatedLead.name} (${updatedLead.company})`,
+              }));
+              return [newTask, ...updatedExisting, ...otherTasks];
             }
           } else if (data.next_follow_up === '' || data.next_follow_up === null) {
-            const completedLeadTasks = leadTasks.filter((t) => t.completed);
-            return [...completedLeadTasks, ...otherTasks];
+            const remainingLeadTasks = leadTasks
+              .filter((t) => !(t.task_type === 'system_follow_up' && !t.completed))
+              .map((task) => ({
+                ...task,
+                lead_name: `${updatedLead.name} (${updatedLead.company})`,
+              }));
+            return [...remainingLeadTasks, ...otherTasks];
           }
 
           const updatedLeadTasks = leadTasks.map((task) => ({

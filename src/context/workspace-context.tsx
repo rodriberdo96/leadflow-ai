@@ -53,7 +53,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { isProduction } = useAppMode();
 
-  // In production, activeWorkspace must NEVER accidentally be DEMO_WORKSPACE
+  // In production, activeWorkspace must NEVER be DEMO_WORKSPACE under any circumstances (including unauthenticated)
   const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace | null>(() => {
     return isProduction ? null : DEMO_WORKSPACE;
   });
@@ -62,6 +62,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  const prevUserIdRef = useRef<string | null | undefined>(user?.id);
+  const prevModeRef = useRef<boolean>(isProduction);
   const creationInProgressRef = useRef(false);
   const inFlightRefreshRef = useRef<Promise<void> | null>(null);
 
@@ -69,8 +71,19 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const supabase = supabaseClient as unknown as import('@supabase/supabase-js').SupabaseClient | null;
 
   const refreshWorkspaces = useCallback(async (): Promise<void> => {
-    if (!isProduction || !user || !supabase) {
+    // Demo Mode handling: explicitly isolate from production
+    if (!isProduction) {
       setActiveWorkspace(DEMO_WORKSPACE);
+      setWorkspaces([]);
+      setMemberships([]);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
+    // In production mode: if unauthenticated or no supabase client, activeWorkspace MUST be null
+    if (!user || !supabase) {
+      setActiveWorkspace(null);
       setWorkspaces([]);
       setMemberships([]);
       setIsLoading(false);
@@ -81,7 +94,13 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       return inFlightRefreshRef.current;
     }
 
+    const currentUserId = user.id;
+
     const refreshPromise = (async () => {
+      // Clear active workspace when production workspace loading begins
+      setActiveWorkspace(null);
+      setWorkspaces([]);
+      setMemberships([]);
       setIsLoading(true);
       setError(null);
 
@@ -90,9 +109,14 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         const { data: memberRows, error: memberErr } = await supabase
           .from('workspace_members')
           .select('*')
-          .eq('user_id', user.id);
+          .eq('user_id', currentUserId);
 
         if (memberErr) throw new Error(memberErr.message);
+
+        // Abort if user changed while request was in-flight
+        if (prevUserIdRef.current !== currentUserId) {
+          return;
+        }
 
         const membershipsList = (memberRows as unknown as WorkspaceMember[]) || [];
         setMemberships(membershipsList);
@@ -120,13 +144,19 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
               throw new Error(`Failed to initialize default workspace: ${createErr.message}`);
             }
 
-            const { data: createdWs } = await supabase
+            if (prevUserIdRef.current !== currentUserId) {
+              return;
+            }
+
+            const { data: createdWs, error: fetchCreatedErr } = await supabase
               .from('workspaces')
               .select('*')
               .eq('id', newWsId)
               .single();
 
-            if (createdWs) {
+            if (fetchCreatedErr) throw new Error(fetchCreatedErr.message);
+
+            if (createdWs && prevUserIdRef.current === currentUserId) {
               const ws = createdWs as unknown as Workspace;
               setWorkspaces([ws]);
               setActiveWorkspace({
@@ -149,6 +179,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
           if (wsErr) throw new Error(wsErr.message);
 
+          if (prevUserIdRef.current !== currentUserId) {
+            return;
+          }
+
           const loadedWorkspaces = (wsRows as unknown as Workspace[]) || [];
           setWorkspaces(loadedWorkspaces);
 
@@ -165,6 +199,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (err) {
         console.error('[WorkspaceProvider] Error fetching workspaces:', err);
+        // Clear stale workspace state when memberships or workspace loading fail
+        setActiveWorkspace(null);
+        setWorkspaces([]);
+        setMemberships([]);
         setError(err instanceof Error ? err : new Error('Failed to load workspace.'));
       } finally {
         setIsLoading(false);
@@ -177,16 +215,36 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, [isProduction, user, supabase]);
 
   useEffect(() => {
+    // Detect user logout or user change immediately
+    const userChanged = prevUserIdRef.current !== user?.id;
+    const modeChanged = prevModeRef.current !== isProduction;
+    prevUserIdRef.current = user?.id;
+    prevModeRef.current = isProduction;
+
+    if (userChanged || modeChanged) {
+      // Invalidate any active in-flight request on user or mode change
+      inFlightRefreshRef.current = null;
+    }
+
     const timer = setTimeout(() => {
-      if (isProduction && user) {
-        void refreshWorkspaces();
+      if (isProduction) {
+        if (user) {
+          void refreshWorkspaces();
+        } else {
+          setActiveWorkspace(null);
+          setWorkspaces([]);
+          setMemberships([]);
+          setIsLoading(false);
+        }
       } else {
         setActiveWorkspace(DEMO_WORKSPACE);
         setWorkspaces([]);
         setMemberships([]);
+        setError(null);
         setIsLoading(false);
       }
     }, 0);
+
     return () => clearTimeout(timer);
   }, [isProduction, user, refreshWorkspaces]);
 

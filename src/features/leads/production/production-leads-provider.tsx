@@ -1,6 +1,14 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import type { Lead, LeadActivity, LeadTask } from '@/types/lead';
 import type { LeadFormData } from '@/lib/validation/lead';
 import {
@@ -34,17 +42,25 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
   const [leads, setLeads] = useState<Lead[]>([]);
   const [tasks, setTasks] = useState<LeadTask[]>([]);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
   const workspaceId = activeWorkspace?.id;
+  const currentWorkspaceIdRef = useRef<string | undefined>(workspaceId);
+  const requestIdRef = useRef<number>(0);
 
   const refreshData = useCallback(async () => {
+    // Clear data when there is no valid production workspace
     if (!workspaceId || workspaceId === 'ws-demo-1') {
+      setLeads([]);
+      setTasks([]);
+      setActivities([]);
       setIsLoading(false);
+      setError(null);
       return;
     }
 
+    const thisRequestId = ++requestIdRef.current;
     setIsLoading(true);
     setError(null);
 
@@ -57,26 +73,54 @@ export function ProductionLeadsProvider({ children }: { children: React.ReactNod
         ),
       ]);
 
+      // Prevent stale asynchronous requests from an old workspace from overwriting data
+      if (thisRequestId !== requestIdRef.current || workspaceId !== currentWorkspaceIdRef.current) {
+        return;
+      }
+
       setLeads(loadedLeads);
       setTasks(loadedTasks);
       setActivities(loadedActivities);
     } catch (err) {
+      if (thisRequestId !== requestIdRef.current || workspaceId !== currentWorkspaceIdRef.current) {
+        return;
+      }
       console.error('[ProductionLeadsProvider] Failed to load data:', err);
+      // Clear data on failure to guarantee consistent state without stale data
+      setLeads([]);
+      setTasks([]);
+      setActivities([]);
       setError(
         err instanceof Error
           ? err
           : new SupabaseServiceError('Failed to load agency leads and tasks.')
       );
     } finally {
-      setIsLoading(false);
+      if (thisRequestId === requestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [workspaceId]);
 
   useEffect(() => {
+    const prevWorkspaceId = currentWorkspaceIdRef.current;
+    currentWorkspaceIdRef.current = workspaceId;
+
+    // Clear previous workspace data immediately before loading a different workspace
+    if (prevWorkspaceId !== workspaceId) {
+      setLeads([]);
+      setTasks([]);
+      setActivities([]);
+      setError(null);
+    }
+
     const timer = setTimeout(() => {
       if (workspaceId && workspaceId !== 'ws-demo-1') {
         void refreshData();
       } else {
+        setLeads([]);
+        setTasks([]);
+        setActivities([]);
         setIsLoading(false);
       }
     }, 0);

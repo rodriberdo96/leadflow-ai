@@ -52,6 +52,7 @@ describe('Milestone 2 QA Remediation - Data Integrity & Task Consistency', () =>
         due_date: '2026-11-05T10:00:00Z',
         completed: false,
         completed_at: null,
+        task_type: 'manual',
       });
       expect(created.lead_name).toBe('John Doe (Acme Corp)');
     });

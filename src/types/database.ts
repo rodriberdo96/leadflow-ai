@@ -174,6 +174,7 @@ export type Database = {
           completed_at: string | null;
           created_at: string;
           updated_at: string;
+          task_type: 'system_follow_up' | 'manual';
         };
         Insert: {
           id?: string;
@@ -186,6 +187,7 @@ export type Database = {
           completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          task_type?: 'system_follow_up' | 'manual';
         };
         Update: {
           id?: string;
@@ -198,6 +200,7 @@ export type Database = {
           completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          task_type?: 'system_follow_up' | 'manual';
         };
         Relationships: [];
       };

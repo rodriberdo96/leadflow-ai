@@ -195,6 +195,7 @@ interface TaskJoinResult {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  task_type?: 'system_follow_up' | 'manual' | null;
   leads?: {
     name: string;
     company: string;
@@ -226,6 +227,7 @@ export const supabaseTasksService = {
       completed: t.completed,
       completed_at: t.completed_at || undefined,
       created_at: t.created_at,
+      task_type: t.task_type || 'manual',
     }));
   },
 
@@ -243,6 +245,7 @@ export const supabaseTasksService = {
       due_date: taskData.due_date,
       completed: taskData.completed ?? false,
       completed_at: taskData.completed_at || null,
+      task_type: taskData.task_type || 'manual',
     };
 
     const { data, error } = await supabase
@@ -267,6 +270,7 @@ export const supabaseTasksService = {
       completed: created.completed,
       completed_at: created.completed_at || undefined,
       created_at: created.created_at,
+      task_type: created.task_type || 'manual',
     };
   },
 
@@ -282,6 +286,7 @@ export const supabaseTasksService = {
       due_date: updates.due_date,
       completed: updates.completed,
       completed_at: updates.completed_at !== undefined ? updates.completed_at || null : undefined,
+      task_type: updates.task_type,
       updated_at: new Date().toISOString(),
     };
 
